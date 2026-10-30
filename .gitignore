@@ -1,0 +1,14 @@
+# Compilados
+*.class
+
+# Zip de entrega
+*.zip
+
+# Editores
+.vscode/
+.idea/
+*.iml
+
+# Sistema
+.DS_Store
+grupo.txt
