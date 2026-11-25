@@ -138,6 +138,10 @@ public class ChatServer
     String message = decoder.decode(buffer).toString();
     System.out.print( message );
 
+    buffer.rewind();
+    sc.write(buffer);  
+
     return true;
+
   }
 }
