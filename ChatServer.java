@@ -13,6 +13,7 @@ public class ChatServer
   // Decoder for incoming text -- assume UTF-8
   static private final Charset charset = Charset.forName("UTF8");
   static private final CharsetDecoder decoder = charset.newDecoder();
+  static Selector selector;
 
 
   static public void main( String args[] ) throws Exception {
@@ -33,7 +34,7 @@ public class ChatServer
       ss.bind( isa );
 
       // Create a new Selector for selecting
-      Selector selector = Selector.open();
+      selector = Selector.open();
 
       // Register the ServerSocketChannel, so we can listen for incoming
       // connections
@@ -134,12 +135,57 @@ public class ChatServer
       return false;
     }
 
+    Set<SelectionKey> users = selector.keys();
+
+    SelectionKey atual = sc.keyFor(selector);
+
+    if (atual.attachment() == null){
+
+      String message = decoder.decode(buffer).toString();
+      System.out.print("New username:"+ " " + message );
+
+      atual.attach(message);
+
+      return true;
+
+    }
+
     // Decode and print the message to stdout
     String message = decoder.decode(buffer).toString();
     System.out.print( message );
 
-    buffer.rewind();
-    sc.write(buffer);  
+    Iterator<SelectionKey> it = users.iterator();
+    while (it.hasNext()) {
+      
+      SelectionKey user = it.next();
+
+      if (user.channel() instanceof ServerSocketChannel){
+
+        continue;
+
+      }
+
+      /*if (user.equals(sc.keyFor(selector))) continue;*/
+
+      SocketChannel answer;
+
+      answer = (SocketChannel)user.channel();
+
+      buffer.clear();
+
+      String pre = sc.keyFor(selector).attachment().toString();
+
+      String nick = pre.trim();
+
+      String send = nick + ": " +  message;
+
+      buffer.put(send.getBytes(charset));
+
+      buffer.flip();
+
+      answer.write(buffer);
+
+    } 
 
     return true;
 
