@@ -5,8 +5,34 @@ import java.nio.channels.*;
 import java.nio.charset.*;
 import java.util.*;
 
-public class ChatServer
-{
+
+
+public class ChatServer{
+
+  enum State {
+    
+    REG,
+    WAITING,
+    ONLINE    
+    
+  }
+
+  static class User{
+
+    public String nick;
+    public State state;
+    public String sala;
+    public ByteBuffer buffer;
+
+    User(){
+
+      this.state = State.REG;
+      this.buffer = ByteBuffer.allocate(16384);
+
+    }
+    
+  }   
+
   // A pre-allocated buffer for the received data
   static private final ByteBuffer buffer = ByteBuffer.allocate( 16384 );
 
@@ -14,6 +40,8 @@ public class ChatServer
   static private final Charset charset = Charset.forName("UTF8");
   static private final CharsetDecoder decoder = charset.newDecoder();
   static Selector selector;
+  static Set<String> nicks_usados = new HashSet<>();
+
 
 
   static public void main( String args[] ) throws Exception {
@@ -73,7 +101,7 @@ public class ChatServer
             sc.configureBlocking( false );
 
             // Register it with the selector, for reading
-            sc.register( selector, SelectionKey.OP_READ );
+            sc.register( selector, SelectionKey.OP_READ, new User());
 
           } else if (key.isReadable()) {
 
@@ -125,36 +153,113 @@ public class ChatServer
 
   // Just read the message from the socket and send it to stdout
   static private boolean processInput( SocketChannel sc ) throws IOException {
-    // Read the message to the buffer
-    buffer.clear();
-    sc.read( buffer );
-    buffer.flip();
+    
+    SelectionKey atual = sc.keyFor(selector);
+
+    User u = ((User) atual.attachment());
+
+    ByteBuffer userbuffer = u.buffer;
+
+    int fechado = sc.read( userbuffer );
+    userbuffer.flip();
 
     // If no data, close the connection
-    if (buffer.limit()==0) {
+    if (fechado==-1) {
+      
+      nicks_usados.remove(u.nick);
+
       return false;
     }
 
     Set<SelectionKey> users = selector.keys();
 
-    SelectionKey atual = sc.keyFor(selector);
+    int i = userbuffer.position();
 
-    if (atual.attachment() == null){
+    while (userbuffer.position() < userbuffer.limit()) {
 
-      String message = decoder.decode(buffer).toString();
+      boolean achou = false;
+
+      for (int j = userbuffer.position(); j < userbuffer.limit(); j++){
+
+        if (userbuffer.get(j) == '\n'){
+
+          i = j;
+
+          achou = true;
+
+          break;
+
+        }        
+
+      }
+
+      if (achou){
+
+          byte[] linha = new byte[i-userbuffer.position()];
+
+          userbuffer.get(linha);
+        
+          String linha_str = new String(linha, charset);
+
+          if (e_comando(linha_str)){
+
+            String[] pedacos = linha_str.split(" ");
+
+            String resposta = comandos(atual, pedacos);
+
+            enviar(sc, resposta);
+
+            if (resposta.equals("BYE")){
+
+              return false;
+
+            }
+
+          }else{
+
+            if (!linha_str.isEmpty() && linha_str.charAt(0) == '/')
+
+              linha_str = linha_str.substring(1);
+
+            if (u.state.equals(State.REG) || u.state.equals(State.WAITING)){
+
+              enviar(sc, "ERROR");
+
+            }
+
+          }
+
+          userbuffer.get();
+
+        } 
+
+        else{
+
+          break;
+
+        }
+      
+    }
+
+    userbuffer.compact();
+
+    /*if (((User) atual.attachment()).nick == null){
+
+      String message = decoder.decode(userbuffer).toString();
+      userbuffer.compact();
       System.out.print("New username:"+ " " + message );
 
-      atual.attach(message);
+      String nickname = message.trim();
+
+      ((User) atual.attachment()).nick = nickname;
 
       return true;
 
-    }
+    }*/
 
     // Decode and print the message to stdout
-    String message = decoder.decode(buffer).toString();
-    System.out.print( message );
-
     Iterator<SelectionKey> it = users.iterator();
+    /* 
     while (it.hasNext()) {
       
       SelectionKey user = it.next();
@@ -165,7 +270,7 @@ public class ChatServer
 
       }
 
-      /*if (user.equals(sc.keyFor(selector))) continue;*/
+      //if (user.equals(sc.keyFor(selector))) continue;
 
       SocketChannel answer;
 
@@ -173,9 +278,7 @@ public class ChatServer
 
       buffer.clear();
 
-      String pre = sc.keyFor(selector).attachment().toString();
-
-      String nick = pre.trim();
+      String nick = ((User) atual.attachment()).nick;
 
       String send = nick + ": " +  message;
 
@@ -185,9 +288,70 @@ public class ChatServer
 
       answer.write(buffer);
 
-    } 
+    } */
 
     return true;
 
   }
+
+
+  static public String comandos(SelectionKey user, String[] pedacos){
+
+    String comando = pedacos[0];
+
+    User u = (User) user.attachment();
+
+    if (comando.equals("/nick")){
+
+      if (pedacos.length != 2) return "ERROR"; 
+
+      if (nicks_usados.contains(pedacos[1])) return "ERROR";
+
+      if (u.state.equals(State.REG)) 
+        
+        u.state = State.WAITING;
+
+      else
+
+        nicks_usados.remove(u.nick);
+
+      u.nick = pedacos[1];
+      nicks_usados.add(pedacos[1]);
+
+      return "OK";
+
+    }
+
+    if (comando.equals("/bye")){
+
+      if (pedacos.length != 1) return "ERROR";
+
+      nicks_usados.remove(u.nick);
+
+      return "BYE";
+
+    }
+
+    return "ERROR";
+
+  }
+
+  static public boolean e_comando(String linha){
+
+    if (linha.length() == 1 && linha.charAt(0) == '/') return true;
+
+    if (!linha.isEmpty() && linha.charAt(0) == '/' && linha.length() >= 2 && linha.charAt(1) != '/' ) return true;
+
+    return false;
+
+  }
+
+  static public void enviar(SocketChannel channel, String mensgem) throws IOException{
+
+    ByteBuffer buffer = charset.encode(mensgem + "\n");
+
+    channel.write(buffer);
+
+  }
+
 }
